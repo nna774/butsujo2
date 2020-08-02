@@ -34,7 +34,7 @@ int main(void) {
     sigma = 0.1;
 
  /** L=2*sigma*Δt/(Δx)^2 **/
-    AL = 20.0;
+    AL = 5.0/3;
 
  /** 陰解法の割合（θ=0：陽解法，1：完全陰解法） **/
     theta = 1.0;
@@ -50,100 +50,114 @@ int main(void) {
     dtrec = 1.0;
 
  /** データ記録ファイル **/
-    fp = fopen("implicit.txt","w");
+    fp = fopen("implicit2.txt","w");
+    FILE *efp = fopen("errors.txt", "w");
 
-/*****  以上パラメータ設定  *****/
+    for(int k = 0; k < 2; ++k) {
+      if(k == 0) AL = 5.0/3;
+      else AL = 1.0/3;
 
-/** 刻み幅，ステップ数 **/
-    dx = alength / N;
-    dt = pow(dx,2.0) * AL / (2*sigma);
-    iend = (tend-tstart)/dt + 1;
+      for(theta = 0.2; theta < 0.5; theta += 0.01) {
+    /*****  以上パラメータ設定  *****/
 
-/** 初期条件設定 **/
-    x[0] = 0;
-    u[0] = 0;
+    /** 刻み幅，ステップ数 **/
+        dx = alength / N;
+        dt = pow(dx,2.0) * AL / (2*sigma);
+        iend = (tend-tstart)/dt + 1;
+    /** 初期条件設定 **/
+        x[0] = 0;
+        u[0] = 0;
 
-    for(i = 1; i <= N-1; i++) {
-        x[i] = alength/N*i;
-        u[i] = UINIT(x[i]);
-    }
+        for(i = 1; i <= N-1; i++) {
+            x[i] = alength/N*i;
+            u[i] = UINIT(x[i]);
+        }
 
-    x[N] = alength;
-    u[N] = 0.0;
+        x[N] = alength;
+        u[N] = 0.0;
 
-    t = tstart;
-    trec = tstart+dtrec;
+        t = tstart;
+        trec = tstart+dtrec;
 
-/** 初期条件の記録 **/
-    for(i = 0; i <= N; i++) {
-        r1 = x[i];
-        r2 = u[i];
-        r3 = UINIT(x[i]);
-        r4 = t;
-        fprintf(fp, "%12.5e %12.5e %12.5e %12.5e\n", r1, r2, r3, r4);
-    }
+    /** 初期条件の記録 **/
+        for(i = 0; i <= N; i++) {
+            r1 = x[i];
+            r2 = u[i];
+            r3 = UINIT(x[i]);
+            r4 = t;
+            fprintf(fp, "%12.5e %12.5e %12.5e %12.5e\n", r1, r2, r3, r4);
+        }
 
-/** 係数行列作成 **/
-    alpha = AL * theta / 2;
+    /** 係数行列作成 **/
+        alpha = AL * theta / 2;
 
-    for(istep = 0; istep <= iend; istep++) {
-       for(i = 1; i <= N-1; i++) {
-           a[i-1] = -alpha;
-           b[i-1] = 1 + 2*alpha;
-           c[i-1] = -alpha;
-           d[i-1] = u[i] + AL*(1-theta)/2*(u[i+1]-2*u[i]+u[i-1]);
+        for(istep = 0; istep <= iend; istep++) {
+           for(i = 1; i <= N-1; i++) {
+               a[i-1] = -alpha;
+               b[i-1] = 1 + 2*alpha;
+               c[i-1] = -alpha;
+               d[i-1] = u[i] + AL*(1-theta)/2*(u[i+1]-2*u[i]+u[i-1]);
+           }
+
+    /** 一次方程式をThomas アルゴリズムで解く **/
+
+           c[0] = c[0] / b[0];
+           d[0] = d[0] / b[0];
+
+           for(i = 1; i <= N-2; i++) {
+               bumbo = b[i] - a[i] * c[i-1];
+               c[i]  = c[i]/bumbo;
+               d[i]  = (d[i]-a[i]*d[i-1])/bumbo;
+           }
+
+           unew[0] = 0.0;
+           unew[N] = 0.0;
+           unew[N-1] = d[N-2];
+           for(i = N-2; i >= 1; i--) {
+               unew[i] = d[i-1] - c[i-1] * unew[i+1];
+           }
+
+           for(i = 0; i <= N; i++) {
+               u[i] = unew[i];
+           }
+
+    /** 時間を進める **/
+           t = t + dt;
+
+    /** 記録時刻であれば記録する **/
+           if(trec-dt/2 <= t && t < trec+dt/2) {
+              for(i = 0; i <= N; i++) {
+    /** x座標  **/
+                  r1 = x[i];
+    /** 数値解 **/
+                  r2 = u[i];
+    /** 解析解 **/
+                  r3 = USOL(x[i]);
+    /** 時刻   **/
+                  r4 = t;
+                  fprintf(fp, "%12.5e %12.5e %12.5e %12.5e\n", r1, r2, r3, r4);
+              }
+
+    /** 次の記録時刻の設定 **/
+              trec = trec + dtrec;
+           }
+
+    /** 最終時刻であれば止める **/
+           if(fabs(t-tend) < dt/2) {
+              double E = 0;
+              for(int i = 0; i <= N; ++i) {
+                E += pow(fabs(u[i] - USOL(x[i])), 2);
+              }
+              E *= dx;
+              fprintf(efp, "%12.5e %12.5e\n", theta, E);
+              break;
+           }
        }
+     }
 
-/** 一次方程式をThomas アルゴリズムで解く **/
-
-       c[0] = c[0] / b[0];
-       d[0] = d[0] / b[0];
-
-       for(i = 1; i <= N-2; i++) {
-           bumbo = b[i] - a[i] * c[i-1];
-           c[i]  = c[i]/bumbo;
-           d[i]  = (d[i]-a[i]*d[i-1])/bumbo;
-       }
-
-       unew[0] = 0.0;
-       unew[N] = 0.0;
-       unew[N-1] = d[N-2];
-       for(i = N-2; i >= 1; i--) {
-           unew[i] = d[i-1] - c[i-1] * unew[i+1];
-       }
-
-       for(i = 0; i <= N; i++) {
-           u[i] = unew[i];
-       }
-
-/** 時間を進める **/
-       t = t + dt;
-
-/** 記録時刻であれば記録する **/
-       if(trec-dt/2 <= t && t < trec+dt/2) {
-          for(i = 0; i <= N; i++) {
-/** x座標  **/
-              r1 = x[i];
-/** 数値解 **/
-              r2 = u[i];
-/** 解析解 **/
-              r3 = USOL(x[i]);
-/** 時刻   **/
-              r4 = t;
-              fprintf(fp, "%12.5e %12.5e %12.5e %12.5e\n", r1, r2, r3, r4);
-          }
-
-/** 次の記録時刻の設定 **/
-          trec = trec + dtrec;
-       }
-
-
-/** 最終時刻であれば止める **/
-       if(fabs(t-tend) < dt/2) {
-            break;
-       }
-
+     fprintf(efp, "\n\n");
    }
 
    fclose(fp);
+   fclose(efp);
 }
